@@ -5,7 +5,7 @@ with open("README.md", encoding="utf-8") as f:
 
 setup(
     name="pylibnmea2k",
-    version="0.2.0",
+    version="0.2.3",
     description="Minimal, fast NMEA 2000 single-frame PGN decoder",
     long_description=long_description,
     long_description_content_type="text/markdown",

@@ -26,19 +26,28 @@ Not supported (fast-packet / multi-frame):
     127506  DC Status
     129029  GNSS Position
 
+None-return policy
+    decode() returns None when:
+      - the line is malformed or the PGN is unsupported
+      - the primary measurement field(s) carry the "not available" sentinel
+    It returns a dataclass with None fields when:
+      - the frame carries a valid instance/secondary identifier but individual
+        measurement fields are unavailable (Rudder, Depth, DateTime, FluidLevel,
+        Battery, Attitude, Env, EnvParams)
+
 Usage:
     import pylibnmea2k
 
     msg = pylibnmea2k.decode(line)          # stateless
     decoder = pylibnmea2k.Decoder()
-    msg = decoder.decode(line)           # stateful wrapper
+    msg = decoder.decode(line)              # stateful wrapper (reserved for future fast-packet support)
 """
 
 import math
 import struct
 from dataclasses import dataclass
 
-__version__ = "0.2.0"
+__version__ = "0.2.3"
 __all__ = [
     "Decoder", "decode",
     "PGN_RUDDER", "PGN_HEADING", "PGN_ROT", "PGN_ATTITUDE",
@@ -75,7 +84,7 @@ _MS_TO_KN   = 1.94384    # m/s → knots
 
 # ── Result types ──────────────────────────────────────────────────────────────
 
-@dataclass
+@dataclass(slots=True)
 class Rudder:
     pgn:          int
     priority:     int
@@ -84,7 +93,7 @@ class Rudder:
     position_deg: float | None   # degrees, + = starboard; None = not available
 
 
-@dataclass
+@dataclass(slots=True)
 class Heading:
     pgn:      int
     priority: int
@@ -92,7 +101,7 @@ class Heading:
     hdg_deg:  float        # degrees true, 0–360
 
 
-@dataclass
+@dataclass(slots=True)
 class Rot:
     pgn:       int
     priority:  int
@@ -100,7 +109,7 @@ class Rot:
     rot_rad_s: float       # rad/s, + = turning clockwise (starboard)
 
 
-@dataclass
+@dataclass(slots=True)
 class Attitude:
     pgn:       int
     priority:  int
@@ -110,7 +119,7 @@ class Attitude:
     roll_deg:  float | None   # + = starboard down
 
 
-@dataclass
+@dataclass(slots=True)
 class FluidLevel:
     pgn:        int
     priority:   int
@@ -121,7 +130,7 @@ class FluidLevel:
     capacity_l: float | None
 
 
-@dataclass
+@dataclass(slots=True)
 class Battery:
     pgn:       int
     priority:  int
@@ -132,15 +141,15 @@ class Battery:
     temp_k:    float | None
 
 
-@dataclass
+@dataclass(slots=True)
 class Speed:
-    pgn:     int
+    pgn:      int
     priority: int
-    source:  int
-    stw_kn:  float         # speed through water, knots
+    source:   int
+    stw_kn:   float        # speed through water, knots
 
 
-@dataclass
+@dataclass(slots=True)
 class Depth:
     pgn:      int
     priority: int
@@ -149,7 +158,7 @@ class Depth:
     offset_m: float | None   # transducer offset; None = not available
 
 
-@dataclass
+@dataclass(slots=True)
 class PosRapid:
     pgn:      int
     priority: int
@@ -158,7 +167,7 @@ class PosRapid:
     lon:      float        # decimal degrees, + = E
 
 
-@dataclass
+@dataclass(slots=True)
 class CogSog:
     pgn:      int
     priority: int
@@ -167,7 +176,7 @@ class CogSog:
     sog_kn:   float        # knots
 
 
-@dataclass
+@dataclass(slots=True)
 class DateTime:
     pgn:              int
     priority:         int
@@ -177,7 +186,7 @@ class DateTime:
     local_offset_min: int | None # UTC offset in minutes; None = not available
 
 
-@dataclass
+@dataclass(slots=True)
 class Xte:
     pgn:      int
     priority: int
@@ -185,7 +194,7 @@ class Xte:
     xte_m:    float        # metres, + = right of course
 
 
-@dataclass
+@dataclass(slots=True)
 class Wind:
     pgn:       int
     priority:  int
@@ -195,70 +204,92 @@ class Wind:
     reference: int         # 0=True(N) 1=Magnetic 2=Apparent 3=True(boat) 4=True(water)
 
 
-@dataclass
+@dataclass(slots=True)
 class Env:
-    pgn:            int
-    priority:       int
-    source:         int
-    water_temp_k:   float | None   # Kelvin
-    air_temp_k:     float | None   # Kelvin
-    pressure_hpa:   float | None   # hPa
-
-
-@dataclass
-class EnvParams:
     pgn:          int
     priority:     int
     source:       int
-    temp_source:  int
-    temp_k:       float | None    # Kelvin
-    humidity_pct: float | None    # %
-    pressure_hpa: float | None    # hPa
+    water_temp_k: float | None   # Kelvin
+    air_temp_k:   float | None   # Kelvin
+    pressure_hpa: float | None   # hPa
+
+
+@dataclass(slots=True)
+class EnvParams:
+    pgn:             int
+    priority:        int
+    source:          int
+    temp_source:     int           # bits 0–5 of byte 1
+    humidity_source: int           # bits 6–7 of byte 1
+    temp_k:          float | None  # Kelvin
+    humidity_pct:    float | None  # %
+    pressure_hpa:    float | None  # hPa
 
 
 # ── Decoder class ─────────────────────────────────────────────────────────────
 
 class Decoder:
-    """Stateful wrapper around decode(). Same interface, for future extension."""
+    """Decode YDWG lines, optionally restricted to a set of PGNs and/or sources.
+
+    Decoder()
+        — decodes all supported PGNs from all sources
+    Decoder(include_pgns={PGN_WIND})
+        — only decodes Wind frames; all other PGNs return None after a fast dict miss
+    Decoder(max_source_addr=200)
+        — discards frames from source addresses >= 200 (e.g. gateway echo addresses)
+    """
+
+    def __init__(self, include_pgns=None, max_source_addr=None):
+        self._decoders = (
+            _DECODERS if include_pgns is None
+            else {pgn: _DECODERS[pgn] for pgn in include_pgns if pgn in _DECODERS}
+        )
+        self._max_source_addr = max_source_addr
 
     def decode(self, line: str):
         """Decode one line. Returns a typed dataclass or None."""
-        return decode(line)
+        parsed = _parse_line(line)
+        if parsed is None:
+            return None
+        pgn, priority, source, parts = parsed
+        if self._max_source_addr is not None and source >= self._max_source_addr:
+            return None
+        handler = self._decoders.get(pgn)
+        if handler:
+            return handler(priority, source, parts)
+        return None
 
 
 # ── Module-level decode ───────────────────────────────────────────────────────
 
 def decode(line: str):
     """Decode one YDWG text line. Returns a typed dataclass or None."""
+    parsed = _parse_line(line)
+    if parsed is None:
+        return None
+    pgn, priority, source, parts = parsed
+    handler = _DECODERS.get(pgn)
+    if handler:
+        return handler(priority, source, parts)
+    return None
+
+
+# ── Line / CAN-ID parser ─────────────────────────────────────────────────────
+
+def _parse_line(line: str):
+    """Parse CAN ID fields. Returns (pgn, priority, source, parts) or None."""
     try:
         parts  = line.split(None, 3)
         can_id = int(parts[2], 16)
     except (IndexError, ValueError):
         return None
-
     dp       = (can_id >> 24) & 0x01
     pf       = (can_id >> 16) & 0xFF
     ps       = (can_id >>  8) & 0xFF
     pgn      = (dp << 16) | (pf << 8) | (ps if pf >= 240 else 0)
     priority = (can_id >> 26) & 0x07
     source   = can_id & 0xFF
-
-    if pgn == PGN_RUDDER:    return _rudder(priority, source, parts)
-    if pgn == PGN_HEADING:   return _heading(priority, source, parts)
-    if pgn == PGN_ROT:       return _rot(priority, source, parts)
-    if pgn == PGN_ATTITUDE:  return _attitude(priority, source, parts)
-    if pgn == PGN_FLUID:     return _fluid(priority, source, parts)
-    if pgn == PGN_BATTERY:   return _battery(priority, source, parts)
-    if pgn == PGN_SPEED:     return _speed(priority, source, parts)
-    if pgn == PGN_DEPTH:     return _depth(priority, source, parts)
-    if pgn == PGN_POS_RAPID: return _pos_rapid(priority, source, parts)
-    if pgn == PGN_COG_SOG:   return _cog_sog(priority, source, parts)
-    if pgn == PGN_DATETIME:  return _datetime(priority, source, parts)
-    if pgn == PGN_XTE:       return _xte(priority, source, parts)
-    if pgn == PGN_WIND:      return _wind(priority, source, parts)
-    if pgn == PGN_ENV:       return _env(priority, source, parts)
-    if pgn == PGN_ENV_PARAMS:return _env_params(priority, source, parts)
-    return None
+    return pgn, priority, source, parts
 
 
 # ── Data byte parser ──────────────────────────────────────────────────────────
@@ -281,7 +312,7 @@ def _rudder(priority, source, parts):
     if d is None or len(d) < 6:
         return None
     instance = d[0]
-    _, _, _, pos_raw = struct.unpack_from("<BBhh", d, 0)
+    pos_raw  = struct.unpack_from("<h", d, 4)[0]
     if pos_raw == 0x7FFF:
         return Rudder(PGN_RUDDER, priority, source, instance, None)
     return Rudder(PGN_RUDDER, priority, source, instance,
@@ -496,4 +527,25 @@ def _env_params(priority, source, parts):
     if t is None and h is None and p is None:
         return None
     return EnvParams(PGN_ENV_PARAMS, priority, source,
-                     src_byte & 0x3F, t, h, p)
+                     src_byte & 0x3F, (src_byte >> 6) & 0x03, t, h, p)
+
+
+# ── PGN dispatch table ────────────────────────────────────────────────────────
+
+_DECODERS = {
+    PGN_RUDDER:     _rudder,
+    PGN_HEADING:    _heading,
+    PGN_ROT:        _rot,
+    PGN_ATTITUDE:   _attitude,
+    PGN_FLUID:      _fluid,
+    PGN_BATTERY:    _battery,
+    PGN_SPEED:      _speed,
+    PGN_DEPTH:      _depth,
+    PGN_POS_RAPID:  _pos_rapid,
+    PGN_COG_SOG:    _cog_sog,
+    PGN_DATETIME:   _datetime,
+    PGN_XTE:        _xte,
+    PGN_WIND:       _wind,
+    PGN_ENV:        _env,
+    PGN_ENV_PARAMS: _env_params,
+}
