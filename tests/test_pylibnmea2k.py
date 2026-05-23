@@ -21,10 +21,11 @@ import pylibnmea2k
 _lib = NMEA2000Decoder(
     include_pgns=[
         pylibnmea2k.PGN_RUDDER,    pylibnmea2k.PGN_HEADING,  pylibnmea2k.PGN_ROT,
-        pylibnmea2k.PGN_ATTITUDE,  pylibnmea2k.PGN_FLUID,    pylibnmea2k.PGN_BATTERY,
-        pylibnmea2k.PGN_SPEED,     pylibnmea2k.PGN_DEPTH,    pylibnmea2k.PGN_POS_RAPID,
-        pylibnmea2k.PGN_COG_SOG,   pylibnmea2k.PGN_DATETIME, pylibnmea2k.PGN_XTE,
-        pylibnmea2k.PGN_WIND,      pylibnmea2k.PGN_ENV,      pylibnmea2k.PGN_ENV_PARAMS,
+        pylibnmea2k.PGN_ATTITUDE,  pylibnmea2k.PGN_MAG_VAR,  pylibnmea2k.PGN_FLUID,
+        pylibnmea2k.PGN_BATTERY,   pylibnmea2k.PGN_SPEED,    pylibnmea2k.PGN_DEPTH,
+        pylibnmea2k.PGN_POS_RAPID, pylibnmea2k.PGN_COG_SOG,  pylibnmea2k.PGN_DATETIME,
+        pylibnmea2k.PGN_XTE,       pylibnmea2k.PGN_SET_DRIFT, pylibnmea2k.PGN_WIND,
+        pylibnmea2k.PGN_ENV,       pylibnmea2k.PGN_ENV_PARAMS,
     ],
     preferred_units={
         PhysicalQuantities.ANGLE:            "deg",
@@ -71,6 +72,8 @@ _CAN = {
     pylibnmea2k.PGN_COG_SOG:    0x09F80201,
     pylibnmea2k.PGN_DATETIME:   0x09F80901,
     pylibnmea2k.PGN_XTE:        0x09F90301,
+    pylibnmea2k.PGN_SET_DRIFT:  0x09F90B01,
+    pylibnmea2k.PGN_MAG_VAR:    0x09F11A01,
     pylibnmea2k.PGN_WIND:       0x09FD0201,
     pylibnmea2k.PGN_ENV:        0x09FD0601,
     pylibnmea2k.PGN_ENV_PARAMS: 0x09FD0701,
@@ -540,6 +543,84 @@ class TestBattery(unittest.TestCase):
         self.assertAlmostEqual(msg.voltage_v, 12.6, delta=0.01)
         self.assertIsNone(msg.current_a)
         self.assertIsNone(msg.temp_k)
+
+
+# ── PGN 127258 — Magnetic Variation ──────────────────────────────────────────
+
+class TestMagVariation(unittest.TestCase):
+    VAR_DEG = 5.0   # 5° East
+    LINE = _ydwg(_CAN[pylibnmea2k.PGN_MAG_VAR],
+                 struct.pack("<BBHh",
+                             0,                                  # SID
+                             4,                                  # source = WMM2000
+                             0,                                  # age of service (days)
+                             int(math.radians(VAR_DEG) / 1e-4)))
+
+    def test_decode(self):
+        msg = pylibnmea2k.decode(self.LINE)
+        self.assertIsInstance(msg, pylibnmea2k.MagVariation)
+        self.assertEqual(msg.var_source, 4)
+        self.assertAlmostEqual(msg.variation_deg, self.VAR_DEG, delta=0.01)
+        self.assertEqual(msg.priority, 2)
+        self.assertEqual(msg.source, 1)
+
+    def test_negative_variation(self):
+        line = _ydwg(_CAN[pylibnmea2k.PGN_MAG_VAR],
+                     struct.pack("<BBHh", 0, 1, 0, int(math.radians(-3.0) / 1e-4)))
+        msg = pylibnmea2k.decode(line)
+        self.assertIsInstance(msg, pylibnmea2k.MagVariation)
+        self.assertAlmostEqual(msg.variation_deg, -3.0, delta=0.01)
+
+    def test_variation_not_available(self):
+        line = _ydwg(_CAN[pylibnmea2k.PGN_MAG_VAR],
+                     struct.pack("<BBHh", 0, 4, 0, 0x7FFF))
+        msg = pylibnmea2k.decode(line)
+        self.assertIsInstance(msg, pylibnmea2k.MagVariation)
+        self.assertIsNone(msg.variation_deg)
+        self.assertEqual(msg.var_source, 4)
+
+
+# ── PGN 129291 — Set & Drift Rapid Update ────────────────────────────────────
+
+class TestSetDrift(unittest.TestCase):
+    SET_DEG  = 90.0
+    DRIFT_KN = 1.5
+    LINE = _ydwg(_CAN[pylibnmea2k.PGN_SET_DRIFT],
+                 struct.pack("<BBHH",
+                             0,                                         # SID
+                             0,                                         # reference = True
+                             int(math.radians(SET_DEG) / 1e-4),
+                             int((DRIFT_KN / _MS_TO_KN) / 0.01)))
+
+    def test_decode(self):
+        msg = pylibnmea2k.decode(self.LINE)
+        self.assertIsInstance(msg, pylibnmea2k.SetDrift)
+        self.assertAlmostEqual(msg.set_deg,   self.SET_DEG,  delta=0.01)
+        self.assertAlmostEqual(msg.drift_kn,  self.DRIFT_KN, delta=0.02)
+        self.assertEqual(msg.reference, 0)
+        self.assertEqual(msg.priority, 2)
+        self.assertEqual(msg.source, 1)
+
+    def test_magnetic_reference(self):
+        line = _ydwg(_CAN[pylibnmea2k.PGN_SET_DRIFT],
+                     struct.pack("<BBHH",
+                                 0, 1,
+                                 int(math.radians(180.0) / 1e-4),
+                                 int((0.5 / _MS_TO_KN) / 0.01)))
+        msg = pylibnmea2k.decode(line)
+        self.assertIsInstance(msg, pylibnmea2k.SetDrift)
+        self.assertEqual(msg.reference, 1)
+        self.assertAlmostEqual(msg.set_deg, 180.0, delta=0.01)
+
+    def test_not_available(self):
+        line = _ydwg(_CAN[pylibnmea2k.PGN_SET_DRIFT],
+                     struct.pack("<BBHH", 0, 0, 0xFFFF, 0xFFFF))
+        self.assertIsNone(pylibnmea2k.decode(line))
+
+    def test_set_not_available(self):
+        line = _ydwg(_CAN[pylibnmea2k.PGN_SET_DRIFT],
+                     struct.pack("<BBHH", 0, 0, 0xFFFF, int((1.0 / _MS_TO_KN) / 0.01)))
+        self.assertIsNone(pylibnmea2k.decode(line))
 
 
 # ── Malformed / unrecognised input ────────────────────────────────────────────

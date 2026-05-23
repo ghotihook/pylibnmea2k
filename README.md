@@ -46,6 +46,7 @@ msg = decoder.decode(line)
 | 127250 | Vessel Heading                  | `hdg_deg` |
 | 127251 | Rate of Turn                    | `rot_rad_s` |
 | 127257 | Attitude                        | `yaw_deg`, `pitch_deg`, `roll_deg` |
+| 127258 | Magnetic Variation              | `variation_deg`, `var_source` |
 | 127505 | Fluid Level                     | `level_pct`, `capacity_l`, `fluid_type` |
 | 127508 | Battery Status                  | `voltage_v`, `current_a`, `temp_k` |
 | 128259 | Speed Through Water             | `stw_kn` |
@@ -54,6 +55,7 @@ msg = decoder.decode(line)
 | 129026 | COG & SOG Rapid Update          | `cog_deg`, `sog_kn` |
 | 129033 | Date / Time                     | `date_days`, `time_s`, `local_offset_min` |
 | 129283 | Cross Track Error               | `xte_m` |
+| 129291 | Set & Drift Rapid Update        | `set_deg`, `drift_kn`, `reference` |
 | 130306 | Wind                            | `speed_ms`, `angle_deg`, `reference` |
 | 130310 | Outside Environmental Params    | `water_temp_k`, `air_temp_k`, `pressure_hpa` |
 | 130311 | Environmental Parameters        | `temp_source`, `humidity_source`, `temp_k`, `humidity_pct`, `pressure_hpa` |

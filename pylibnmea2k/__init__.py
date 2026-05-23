@@ -9,6 +9,7 @@ Single-frame PGNs supported:
     127250  Vessel Heading
     127251  Rate of Turn
     127257  Attitude (Roll / Pitch / Yaw)
+    127258  Magnetic Variation
     127505  Fluid Level
     127508  Battery Status
     128259  Speed Through Water
@@ -17,6 +18,7 @@ Single-frame PGNs supported:
     129026  COG & SOG Rapid Update
     129033  Date / Time
     129283  Cross Track Error
+    129291  Set & Drift Rapid Update
     130306  Wind (speed + angle + reference)
     130310  Outside Environmental Parameters
     130311  Environmental Parameters
@@ -33,7 +35,7 @@ None-return policy
     It returns a dataclass with None fields when:
       - the frame carries a valid instance/secondary identifier but individual
         measurement fields are unavailable (Rudder, Depth, DateTime, FluidLevel,
-        Battery, Attitude, Env, EnvParams)
+        Battery, Attitude, Env, EnvParams, MagVariation)
 
 Usage:
     import pylibnmea2k
@@ -47,16 +49,16 @@ import math
 import struct
 from dataclasses import dataclass
 
-__version__ = "0.2.3"
+__version__ = "0.2.4"
 __all__ = [
     "Decoder", "decode",
-    "PGN_RUDDER", "PGN_HEADING", "PGN_ROT", "PGN_ATTITUDE",
+    "PGN_RUDDER", "PGN_HEADING", "PGN_ROT", "PGN_ATTITUDE", "PGN_MAG_VAR",
     "PGN_FLUID", "PGN_BATTERY", "PGN_SPEED", "PGN_DEPTH",
-    "PGN_POS_RAPID", "PGN_COG_SOG", "PGN_DATETIME", "PGN_XTE",
+    "PGN_POS_RAPID", "PGN_COG_SOG", "PGN_DATETIME", "PGN_XTE", "PGN_SET_DRIFT",
     "PGN_WIND", "PGN_ENV", "PGN_ENV_PARAMS",
-    "Rudder", "Heading", "Rot", "Attitude",
+    "Rudder", "Heading", "Rot", "Attitude", "MagVariation",
     "FluidLevel", "Battery", "Speed", "Depth",
-    "PosRapid", "CogSog", "DateTime", "Xte",
+    "PosRapid", "CogSog", "DateTime", "Xte", "SetDrift",
     "Wind", "Env", "EnvParams",
 ]
 
@@ -66,6 +68,7 @@ PGN_RUDDER    = 127245   # Rudder                           (single frame)
 PGN_HEADING   = 127250   # Vessel Heading                   (single frame)
 PGN_ROT       = 127251   # Rate of Turn                     (single frame)
 PGN_ATTITUDE  = 127257   # Attitude — Roll / Pitch / Yaw   (single frame)
+PGN_MAG_VAR   = 127258   # Magnetic Variation               (single frame)
 PGN_FLUID     = 127505   # Fluid Level                      (single frame)
 PGN_BATTERY   = 127508   # Battery Status                   (single frame)
 PGN_SPEED     = 128259   # Speed Through Water              (single frame)
@@ -74,6 +77,7 @@ PGN_POS_RAPID = 129025   # Position Rapid Update            (single frame)
 PGN_COG_SOG   = 129026   # COG & SOG Rapid Update          (single frame)
 PGN_DATETIME  = 129033   # Date / Time                      (single frame)
 PGN_XTE       = 129283   # Cross Track Error                (single frame)
+PGN_SET_DRIFT = 129291   # Set & Drift Rapid Update         (single frame)
 PGN_WIND      = 130306   # Wind Data                        (single frame)
 PGN_ENV       = 130310   # Outside Environmental Params     (single frame)
 PGN_ENV_PARAMS= 130311   # Environmental Parameters         (single frame)
@@ -117,6 +121,25 @@ class Attitude:
     yaw_deg:   float | None
     pitch_deg: float | None   # + = bow up
     roll_deg:  float | None   # + = starboard down
+
+
+@dataclass(slots=True)
+class MagVariation:
+    pgn:           int
+    priority:      int
+    source:        int
+    var_source:    int         # 0=Manual 1=Chart 2=Table 3=Calculated 4=WMM2000 5=WMM2005 6=WMM2010 7=WMM2015 8=WMM2020
+    variation_deg: float | None  # degrees, + = East; None = not available
+
+
+@dataclass(slots=True)
+class SetDrift:
+    pgn:       int
+    priority:  int
+    source:    int
+    set_deg:   float   # direction current flows toward, degrees, 0–360
+    drift_kn:  float   # current speed, knots
+    reference: int     # 0=True 1=Magnetic
 
 
 @dataclass(slots=True)
@@ -511,6 +534,36 @@ def _env(priority, source, parts):
     return Env(PGN_ENV, priority, source, wt, at, pr)
 
 
+def _mag_variation(priority, source, parts):
+    # Byte 0:    SID
+    # Byte 1:    Variation Source (bits 0–3) | reserved
+    # Bytes 2–3: Age of Service  uint16LE  days since 1970-01-01
+    # Bytes 4–5: Variation       int16LE   1e-4 rad/bit  (0x7FFF = n/a)
+    d = _data(parts)
+    if d is None or len(d) < 6:
+        return None
+    _, src_byte, _, var_raw = struct.unpack_from("<BBHh", d, 0)
+    var = None if var_raw == 0x7FFF else var_raw * 1e-4 * _RAD_TO_DEG
+    return MagVariation(PGN_MAG_VAR, priority, source, src_byte & 0x0F, var)
+
+
+def _set_drift(priority, source, parts):
+    # Byte 0:    SID
+    # Byte 1:    Set Reference (bits 0–1) | reserved
+    # Bytes 2–3: Set    uint16LE  1e-4 rad/bit   (0xFFFF = n/a)
+    # Bytes 4–5: Drift  uint16LE  0.01 m/s/bit   (0xFFFF = n/a)
+    d = _data(parts)
+    if d is None or len(d) < 6:
+        return None
+    _, ref_byte, set_raw, drift_raw = struct.unpack_from("<BBHH", d, 0)
+    if set_raw == 0xFFFF or drift_raw == 0xFFFF:
+        return None
+    return SetDrift(PGN_SET_DRIFT, priority, source,
+                    set_raw * 1e-4 * _RAD_TO_DEG % 360.0,
+                    drift_raw * 0.01 * _MS_TO_KN,
+                    ref_byte & 0x03)
+
+
 def _env_params(priority, source, parts):
     # Byte 0:    SID
     # Byte 1:    Temp Source (bits 0–5) | Humidity Source (bits 6–7)
@@ -537,6 +590,7 @@ _DECODERS = {
     PGN_HEADING:    _heading,
     PGN_ROT:        _rot,
     PGN_ATTITUDE:   _attitude,
+    PGN_MAG_VAR:    _mag_variation,
     PGN_FLUID:      _fluid,
     PGN_BATTERY:    _battery,
     PGN_SPEED:      _speed,
@@ -545,6 +599,7 @@ _DECODERS = {
     PGN_COG_SOG:    _cog_sog,
     PGN_DATETIME:   _datetime,
     PGN_XTE:        _xte,
+    PGN_SET_DRIFT:  _set_drift,
     PGN_WIND:       _wind,
     PGN_ENV:        _env,
     PGN_ENV_PARAMS: _env_params,
