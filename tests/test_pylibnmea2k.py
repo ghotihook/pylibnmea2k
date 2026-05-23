@@ -38,8 +38,16 @@ _lib = NMEA2000Decoder(
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
+_MS_TO_KN = pylibnmea2k._MS_TO_KN
+
+
 def _ydwg(can_id: int, data: bytes) -> str:
     return f"12:00:00.000 R {can_id:08X} {' '.join(f'{b:02X}' for b in data)}"
+
+
+def _ydwg_0x(can_id: int, data: bytes) -> str:
+    """YDWG-02 format with 0x-prefixed CAN ID (documented format)."""
+    return f"12:00:00.000 R 0x{can_id:08X} {' '.join(f'{b:02X}' for b in data)}"
 
 
 def _field(msg, field_id):
@@ -68,8 +76,6 @@ _CAN = {
     pylibnmea2k.PGN_ENV_PARAMS: 0x09FD0701,
 }
 
-_MS_TO_KN = 1.94384
-
 
 # ── PGN 129025 — Position Rapid Update ───────────────────────────────────────
 
@@ -82,6 +88,8 @@ class TestPosRapid(unittest.TestCase):
         self.assertIsInstance(msg, pylibnmea2k.PosRapid)
         self.assertAlmostEqual(msg.lat, -33.847, delta=1e-6)
         self.assertAlmostEqual(msg.lon, 151.219, delta=1e-6)
+        self.assertEqual(msg.priority, 2)
+        self.assertEqual(msg.source, 1)
 
     def test_vs_library(self):
         ref = _lib.decode(self.LINE)
@@ -108,6 +116,8 @@ class TestCogSog(unittest.TestCase):
         self.assertIsInstance(msg, pylibnmea2k.CogSog)
         self.assertAlmostEqual(msg.cog_deg, 90.0, delta=0.01)
         self.assertAlmostEqual(msg.sog_kn,   5.0, delta=0.02)
+        self.assertEqual(msg.priority, 2)
+        self.assertEqual(msg.source, 1)
 
     def test_vs_library(self):
         ref = _lib.decode(self.LINE)
@@ -131,6 +141,8 @@ class TestHeading(unittest.TestCase):
         msg = pylibnmea2k.decode(self.LINE)
         self.assertIsInstance(msg, pylibnmea2k.Heading)
         self.assertAlmostEqual(msg.hdg_deg, 45.0, delta=0.01)
+        self.assertEqual(msg.priority, 2)
+        self.assertEqual(msg.source, 1)
 
     def test_vs_library(self):
         ref = _lib.decode(self.LINE)
@@ -154,6 +166,8 @@ class TestRot(unittest.TestCase):
         msg = pylibnmea2k.decode(self.LINE)
         self.assertIsInstance(msg, pylibnmea2k.Rot)
         self.assertAlmostEqual(msg.rot_rad_s, self.ROT_RAD_S, delta=1e-6)
+        self.assertEqual(msg.priority, 2)
+        self.assertEqual(msg.source, 1)
 
     def test_vs_library(self):
         ref = _lib.decode(self.LINE)
@@ -182,6 +196,8 @@ class TestAttitude(unittest.TestCase):
         self.assertAlmostEqual(msg.yaw_deg,    5.0, delta=0.01)
         self.assertAlmostEqual(msg.pitch_deg, -2.0, delta=0.01)
         self.assertAlmostEqual(msg.roll_deg,   3.0, delta=0.01)
+        self.assertEqual(msg.priority, 2)
+        self.assertEqual(msg.source, 1)
 
     def test_vs_library(self):
         ref = _lib.decode(self.LINE)
@@ -216,6 +232,8 @@ class TestSpeed(unittest.TestCase):
         msg = pylibnmea2k.decode(self.LINE)
         self.assertIsInstance(msg, pylibnmea2k.Speed)
         self.assertAlmostEqual(msg.stw_kn, 6.0, delta=0.02)
+        self.assertEqual(msg.priority, 2)
+        self.assertEqual(msg.source, 1)
 
     def test_vs_library(self):
         ref = _lib.decode(self.LINE)
@@ -239,6 +257,8 @@ class TestDepth(unittest.TestCase):
         self.assertIsInstance(msg, pylibnmea2k.Depth)
         self.assertAlmostEqual(msg.depth_m,  10.5, delta=0.01)
         self.assertAlmostEqual(msg.offset_m,  0.5, delta=0.002)
+        self.assertEqual(msg.priority, 2)
+        self.assertEqual(msg.source, 1)
 
     def test_vs_library(self):
         ref = _lib.decode(self.LINE)
@@ -269,6 +289,8 @@ class TestRudder(unittest.TestCase):
         msg = pylibnmea2k.decode(self.LINE)
         self.assertIsInstance(msg, pylibnmea2k.Rudder)
         self.assertAlmostEqual(msg.position_deg, 5.0, delta=0.01)
+        self.assertEqual(msg.priority, 2)
+        self.assertEqual(msg.source, 1)
 
     def test_vs_library(self):
         ref = _lib.decode(self.LINE)
@@ -299,6 +321,8 @@ class TestWind(unittest.TestCase):
         self.assertAlmostEqual(msg.speed_ms,  self.SPEED_MS, delta=0.01)
         self.assertAlmostEqual(msg.angle_deg, 45.0,          delta=0.01)
         self.assertEqual(msg.reference, 2)
+        self.assertEqual(msg.priority, 2)
+        self.assertEqual(msg.source, 1)
 
     def test_vs_library(self):
         ref = _lib.decode(self.LINE)
@@ -324,6 +348,8 @@ class TestDateTime(unittest.TestCase):
         self.assertEqual(msg.date_days, 19869)
         self.assertAlmostEqual(msg.time_s, 43200.0, delta=0.001)
         self.assertEqual(msg.local_offset_min, 0)
+        self.assertEqual(msg.priority, 2)
+        self.assertEqual(msg.source, 1)
 
     def test_vs_library(self):
         ref = _lib.decode(self.LINE)
@@ -358,6 +384,8 @@ class TestXte(unittest.TestCase):
         msg = pylibnmea2k.decode(self.LINE)
         self.assertIsInstance(msg, pylibnmea2k.Xte)
         self.assertAlmostEqual(msg.xte_m, 15.0, delta=0.01)
+        self.assertEqual(msg.priority, 2)
+        self.assertEqual(msg.source, 1)
 
     def test_vs_library(self):
         ref = _lib.decode(self.LINE)
@@ -385,6 +413,8 @@ class TestEnv(unittest.TestCase):
         self.assertAlmostEqual(msg.water_temp_k, 288.15, delta=0.02)
         self.assertAlmostEqual(msg.air_temp_k,   293.15, delta=0.02)
         self.assertAlmostEqual(msg.pressure_hpa, 1013.0, delta=0.5)
+        self.assertEqual(msg.priority, 2)
+        self.assertEqual(msg.source, 1)
 
     def test_vs_library(self):
         ref = _lib.decode(self.LINE)
@@ -403,7 +433,7 @@ class TestEnv(unittest.TestCase):
 
 class TestEnvParams(unittest.TestCase):
     LINE = _ydwg(_CAN[pylibnmea2k.PGN_ENV_PARAMS],
-                 struct.pack("<BBHHH", 0, 0,
+                 struct.pack("<BBHHH", 0, 0b10_000101,  # temp_source=5, humidity_source=2
                              int(288.15 / 0.01),
                              int(60.0   / 0.004),
                              1013))
@@ -411,9 +441,13 @@ class TestEnvParams(unittest.TestCase):
     def test_decode(self):
         msg = pylibnmea2k.decode(self.LINE)
         self.assertIsInstance(msg, pylibnmea2k.EnvParams)
+        self.assertEqual(msg.temp_source,     0b000101)
+        self.assertEqual(msg.humidity_source, 0b10)
         self.assertAlmostEqual(msg.temp_k,       288.15, delta=0.02)
         self.assertAlmostEqual(msg.humidity_pct,  60.0,  delta=0.01)
         self.assertAlmostEqual(msg.pressure_hpa, 1013.0, delta=0.5)
+        self.assertEqual(msg.priority, 2)
+        self.assertEqual(msg.source, 1)
 
     def test_vs_library(self):
         ref = _lib.decode(self.LINE)
@@ -444,6 +478,8 @@ class TestFluidLevel(unittest.TestCase):
         self.assertEqual(msg.fluid_type, 1)
         self.assertAlmostEqual(msg.level_pct,  75.0,  delta=0.01)
         self.assertAlmostEqual(msg.capacity_l, 200.0, delta=0.1)
+        self.assertEqual(msg.priority, 2)
+        self.assertEqual(msg.source, 1)
 
     def test_vs_library(self):
         ref = _lib.decode(self.LINE)
@@ -481,6 +517,8 @@ class TestBattery(unittest.TestCase):
         self.assertAlmostEqual(msg.voltage_v, 12.6,   delta=0.01)
         self.assertAlmostEqual(msg.current_a,  5.0,   delta=0.1)
         self.assertAlmostEqual(msg.temp_k,    298.15, delta=0.02)
+        self.assertEqual(msg.priority, 2)
+        self.assertEqual(msg.source, 1)
 
     def test_vs_library(self):
         ref = _lib.decode(self.LINE)
@@ -521,6 +559,96 @@ class TestMalformed(unittest.TestCase):
         line = _ydwg(_CAN[pylibnmea2k.PGN_POS_RAPID],
                      struct.pack("<i", int(-33.847 * 1e7)))
         self.assertIsNone(pylibnmea2k.decode(line))
+
+    def test_0x_prefixed_can_id(self):
+        line = _ydwg_0x(_CAN[pylibnmea2k.PGN_POS_RAPID],
+                        struct.pack("<ii", int(-33.847 * 1e7), int(151.219 * 1e7)))
+        msg = pylibnmea2k.decode(line)
+        self.assertIsInstance(msg, pylibnmea2k.PosRapid)
+        self.assertAlmostEqual(msg.lat, -33.847, delta=1e-6)
+
+
+# ── Decoder class ─────────────────────────────────────────────────────────────
+
+class TestDecoder(unittest.TestCase):
+    def test_no_filter_matches_module_function(self):
+        decoder = pylibnmea2k.Decoder()
+        self.assertEqual(decoder.decode(TestPosRapid.LINE),
+                         pylibnmea2k.decode(TestPosRapid.LINE))
+
+    def test_no_filter_returns_none_for_unknown(self):
+        decoder = pylibnmea2k.Decoder()
+        self.assertIsNone(decoder.decode("garbage"))
+
+    def test_no_filter_repeated_decodes_independent(self):
+        decoder = pylibnmea2k.Decoder()
+        msg1 = decoder.decode(TestHeading.LINE)
+        msg2 = decoder.decode(TestCogSog.LINE)
+        self.assertIsInstance(msg1, pylibnmea2k.Heading)
+        self.assertIsInstance(msg2, pylibnmea2k.CogSog)
+
+    def test_include_pgns_passes_wanted(self):
+        decoder = pylibnmea2k.Decoder(include_pgns={pylibnmea2k.PGN_COG_SOG})
+        msg = decoder.decode(TestCogSog.LINE)
+        self.assertIsInstance(msg, pylibnmea2k.CogSog)
+
+    def test_include_pgns_blocks_unwanted(self):
+        decoder = pylibnmea2k.Decoder(include_pgns={pylibnmea2k.PGN_COG_SOG})
+        self.assertIsNone(decoder.decode(TestHeading.LINE))
+        self.assertIsNone(decoder.decode(TestWind.LINE))
+
+    def test_include_pgns_multiple(self):
+        decoder = pylibnmea2k.Decoder(
+            include_pgns={pylibnmea2k.PGN_WIND, pylibnmea2k.PGN_DEPTH})
+        self.assertIsInstance(decoder.decode(TestWind.LINE),  pylibnmea2k.Wind)
+        self.assertIsInstance(decoder.decode(TestDepth.LINE), pylibnmea2k.Depth)
+        self.assertIsNone(decoder.decode(TestCogSog.LINE))
+
+    def test_include_pgns_unknown_pgn_ignored(self):
+        decoder = pylibnmea2k.Decoder(include_pgns={0xDEAD})
+        self.assertIsNone(decoder.decode(TestCogSog.LINE))
+
+    def test_include_pgns_empty_set(self):
+        decoder = pylibnmea2k.Decoder(include_pgns=set())
+        self.assertIsNone(decoder.decode(TestCogSog.LINE))
+        self.assertIsNone(decoder.decode(TestHeading.LINE))
+
+    def test_max_source_addr_passes_below(self):
+        # source=1 in TestPosRapid.LINE; threshold=200 should pass
+        decoder = pylibnmea2k.Decoder(max_source_addr=200)
+        self.assertIsInstance(decoder.decode(TestPosRapid.LINE), pylibnmea2k.PosRapid)
+
+    def test_max_source_addr_blocks_at_threshold(self):
+        # source must be >= max_source_addr to be blocked
+        # Build a line with source=200
+        can_id = _CAN[pylibnmea2k.PGN_POS_RAPID] & ~0xFF | 200
+        line = _ydwg(can_id, struct.pack("<ii",
+                     int(-33.847 * 1e7), int(151.219 * 1e7)))
+        decoder = pylibnmea2k.Decoder(max_source_addr=200)
+        self.assertIsNone(decoder.decode(line))
+
+    def test_max_source_addr_blocks_above(self):
+        can_id = _CAN[pylibnmea2k.PGN_POS_RAPID] & ~0xFF | 201
+        line = _ydwg(can_id, struct.pack("<ii",
+                     int(-33.847 * 1e7), int(151.219 * 1e7)))
+        decoder = pylibnmea2k.Decoder(max_source_addr=200)
+        self.assertIsNone(decoder.decode(line))
+
+    def test_max_source_addr_none_no_filter(self):
+        decoder = pylibnmea2k.Decoder(max_source_addr=None)
+        self.assertIsInstance(decoder.decode(TestPosRapid.LINE), pylibnmea2k.PosRapid)
+
+    def test_max_source_addr_combined_with_include_pgns(self):
+        decoder = pylibnmea2k.Decoder(
+            include_pgns={pylibnmea2k.PGN_POS_RAPID},
+            max_source_addr=200,
+        )
+        self.assertIsInstance(decoder.decode(TestPosRapid.LINE), pylibnmea2k.PosRapid)
+        self.assertIsNone(decoder.decode(TestHeading.LINE))  # wrong PGN
+        can_id = _CAN[pylibnmea2k.PGN_POS_RAPID] & ~0xFF | 200
+        line = _ydwg(can_id, struct.pack("<ii",
+                     int(-33.847 * 1e7), int(151.219 * 1e7)))
+        self.assertIsNone(decoder.decode(line))  # blocked by source
 
 
 if __name__ == "__main__":

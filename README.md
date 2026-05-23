@@ -26,6 +26,14 @@ msg = pylibnmea2k.decode(line)
 # Stateful wrapper (same interface)
 decoder = pylibnmea2k.Decoder()
 msg = decoder.decode(line)
+
+# Filter to specific PGNs — non-matching frames cost ~0.5 µs and return None
+decoder = pylibnmea2k.Decoder(include_pgns={pylibnmea2k.PGN_WIND, pylibnmea2k.PGN_COG_SOG})
+msg = decoder.decode(line)
+
+# Discard frames from source addresses >= threshold (e.g. gateway/bridge echo addresses)
+decoder = pylibnmea2k.Decoder(max_source_addr=200)
+msg = decoder.decode(line)
 ```
 
 `decode()` returns a typed dataclass or `None` if the PGN is unsupported or fields are not available.
@@ -44,11 +52,11 @@ msg = decoder.decode(line)
 | 128267 | Water Depth                     | `depth_m`, `offset_m` |
 | 129025 | Position Rapid Update           | `lat`, `lon` |
 | 129026 | COG & SOG Rapid Update          | `cog_deg`, `sog_kn` |
-| 129033 | Date / Time                     | `date_days`, `time_s` |
+| 129033 | Date / Time                     | `date_days`, `time_s`, `local_offset_min` |
 | 129283 | Cross Track Error               | `xte_m` |
 | 130306 | Wind                            | `speed_ms`, `angle_deg`, `reference` |
 | 130310 | Outside Environmental Params    | `water_temp_k`, `air_temp_k`, `pressure_hpa` |
-| 130311 | Environmental Parameters        | `temp_k`, `humidity_pct`, `pressure_hpa` |
+| 130311 | Environmental Parameters        | `temp_source`, `humidity_source`, `temp_k`, `humidity_pct`, `pressure_hpa` |
 
 Fast-packet (multi-frame) PGNs are not currently supported.
 
